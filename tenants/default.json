@@ -1,0 +1,16 @@
+{
+  "name": "AI Skin Analysis",
+  "slug": "default",
+  "logo": null,
+  "primaryColor": "#7C6D5E",
+  "accentColor": "#C8A882",
+  "bookingUrl": null,
+  "services": [
+    "HydraFacial",
+    "Chemical Peel",
+    "Microneedling",
+    "LED Light Therapy",
+    "Laser Resurfacing",
+    "Dermaplaning"
+  ]
+}
