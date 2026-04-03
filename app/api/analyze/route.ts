@@ -16,16 +16,23 @@ export async function POST(request: NextRequest) {
     const tenant = await getCurrentTenant();
 
     // ── Step 1: CV pipeline ───────────────────────────────────────────────────
-    const cvRes = await fetch(`${CV_SERVICE_URL}/analyze`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ image }),
-    });
+    console.log("[cv-service] URL:", CV_SERVICE_URL);
+    let cvRes: Response;
+    try {
+      cvRes = await fetch(`${CV_SERVICE_URL}/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image }),
+      });
+    } catch (fetchErr) {
+      console.error("[cv-service] fetch failed:", fetchErr);
+      return NextResponse.json({ error: `Cannot reach CV service at ${CV_SERVICE_URL}: ${fetchErr}` }, { status: 502 });
+    }
 
     if (!cvRes.ok) {
       const err = await cvRes.text();
-      console.error("[cv-service]", err);
-      return NextResponse.json({ error: "CV analysis service error" }, { status: 502 });
+      console.error("[cv-service] bad status:", cvRes.status, err);
+      return NextResponse.json({ error: `CV service returned ${cvRes.status}: ${err}` }, { status: 502 });
     }
 
     const cv = await cvRes.json();
