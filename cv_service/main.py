@@ -27,12 +27,12 @@ log = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Warm-up: pre-load models on startup so first request is fast
-    log.info("Loading SegFormer face-parsing model…")
+    # Warm-up: pre-load MediaPipe face mesh on startup
+    log.info("Loading MediaPipe Face Mesh…")
     try:
         from face_segment import _load_model
         _load_model()
-        log.info("SegFormer loaded.")
+        log.info("MediaPipe Face Mesh loaded.")
     except Exception as e:
         log.warning(f"Model warm-up failed (will retry on first request): {e}")
     yield

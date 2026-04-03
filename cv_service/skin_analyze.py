@@ -24,32 +24,11 @@ from skimage.filters import gaussian, laplace, sobel
 from skimage.feature import canny
 from skimage.morphology import local_minima
 
-WEIGHTS_PATH = os.path.join(os.path.dirname(__file__), "weights", "skin_model.pt")
-
 CONCERNS = [
     "acne", "hyperpigmentation", "melasma", "redness",
     "wrinkles", "fine_lines", "dryness", "pore_visibility",
     "oiliness", "dark_circles", "uneven_texture",
 ]
-
-_model = None
-_use_model = False
-
-
-def _try_load_model() -> None:
-    global _model, _use_model
-    if not os.path.exists(WEIGHTS_PATH):
-        return
-    from models.efficientnet import SkinAnalysisNet
-    import torch
-    net = SkinAnalysisNet(pretrained=False)
-    net.load_state_dict(torch.load(WEIGHTS_PATH, map_location="cpu"))
-    net.eval()
-    _model = net
-    _use_model = True
-
-
-_try_load_model()
 
 
 # ─── Zone masks ───────────────────────────────────────────────────────────────
