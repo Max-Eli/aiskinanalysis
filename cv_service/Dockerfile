@@ -4,7 +4,7 @@ WORKDIR /app
 
 # System deps for Pillow / scikit-image
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libglib2.0-0 libgl1-mesa-glx && \
+    libglib2.0-0 libgl1-mesa-dev libglib2.0-0 && \
     rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
