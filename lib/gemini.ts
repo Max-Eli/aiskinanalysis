@@ -1,76 +1,125 @@
 /**
  * Gemini 2.0 Flash Vision — skin scoring from a face image.
- * Called server-side from /api/analyze.
+ * Uses responseMimeType:"application/json" to guarantee structured output.
+ * Throws on failure — caller must handle and surface the error.
  */
 
-import { GoogleGenerativeAI, GenerationConfig } from "@google/generative-ai";
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 
-const CONCERNS = [
-  "acne", "hyperpigmentation", "melasma", "redness",
-  "wrinkles", "fine_lines", "dryness", "pore_visibility",
-  "oiliness", "dark_circles", "uneven_texture",
-] as const;
+// ─── Response schema (forces Gemini to always return valid JSON) ──────────────
 
-const PROMPT = `You are a board-certified dermatology AI performing a professional skin analysis for a medical spa client report. Analyze this face image with clinical precision.
-
-IMPORTANT: Every human face has detectable skin characteristics. Even healthy skin shows pore visibility, some texture variation, or minor hydration differences. Never return all zeros — assess what is actually visible.
-
-Examine the image carefully for:
-- ACNE: Active pimples, papules, pustules, comedones, blackheads, post-acne marks
-- HYPERPIGMENTATION: Dark spots, uneven skin tone, sun spots, post-inflammatory marks
-- MELASMA: Larger patches of brown/grey discolouration on cheeks, forehead, upper lip
-- REDNESS: Flushing, visible capillaries, rosacea patterns, irritated zones
-- WRINKLES: Deep lines — forehead, nasolabial folds, crow's feet
-- FINE LINES: Subtle surface lines, perioral lines, under-eye creasing
-- DRYNESS: Flakiness, tight-looking skin, dull matte finish, rough texture
-- PORE VISIBILITY: Enlarged pores especially on nose, T-zone, cheeks
-- OILINESS: Shine, specular highlights on T-zone (forehead, nose, chin)
-- DARK CIRCLES: Periorbital darkening, under-eye discolouration
-- UNEVEN TEXTURE: Rough patches, bumpy skin surface, irregular surface
-
-Return ONLY valid JSON — no markdown, no explanation:
-{
-  "skin_type": "<oily|dry|combination|normal|sensitive>",
-  "overall_score": <integer 0-100, higher = healthier skin overall>,
-  "confidence": <float 0.0-1.0, image clarity for analysis>,
-  "concerns": {
-    "acne": {"score": <0.0-1.0>, "severity": "<none|mild|moderate|severe>"},
-    "hyperpigmentation": {"score": <0.0-1.0>, "severity": "<none|mild|moderate|severe>"},
-    "melasma": {"score": <0.0-1.0>, "severity": "<none|mild|moderate|severe>"},
-    "redness": {"score": <0.0-1.0>, "severity": "<none|mild|moderate|severe>"},
-    "wrinkles": {"score": <0.0-1.0>, "severity": "<none|mild|moderate|severe>"},
-    "fine_lines": {"score": <0.0-1.0>, "severity": "<none|mild|moderate|severe>"},
-    "dryness": {"score": <0.0-1.0>, "severity": "<none|mild|moderate|severe>"},
-    "pore_visibility": {"score": <0.0-1.0>, "severity": "<none|mild|moderate|severe>"},
-    "oiliness": {"score": <0.0-1.0>, "severity": "<none|mild|moderate|severe>"},
-    "dark_circles": {"score": <0.0-1.0>, "severity": "<none|mild|moderate|severe>"},
-    "uneven_texture": {"score": <0.0-1.0>, "severity": "<none|mild|moderate|severe>"}
+const CONCERN_SCHEMA = {
+  type: SchemaType.OBJECT,
+  properties: {
+    score:    { type: SchemaType.NUMBER },
+    severity: { type: SchemaType.STRING },
   },
-  "positives": {
-    "hydration": {"score": <0.0-1.0>, "label": "<needs improvement|fair|good|excellent>"},
-    "evenness": {"score": <0.0-1.0>, "label": "<needs improvement|fair|good|excellent>"},
-    "luminosity": {"score": <0.0-1.0>, "label": "<needs improvement|fair|good|excellent>"},
-    "firmness": {"score": <0.0-1.0>, "label": "<needs improvement|fair|good|excellent>"}
-  },
-  "zone_analysis": {
-    "forehead": {"dominant_concern": "<concern_name>", "score": <0.0-1.0>},
-    "left_cheek": {"dominant_concern": "<concern_name>", "score": <0.0-1.0>},
-    "right_cheek": {"dominant_concern": "<concern_name>", "score": <0.0-1.0>},
-    "nose": {"dominant_concern": "<concern_name>", "score": <0.0-1.0>},
-    "chin": {"dominant_concern": "<concern_name>", "score": <0.0-1.0>}
-  }
-}
+  required: ["score", "severity"],
+};
 
-Scoring rules:
-- score 0.00–0.19 → severity "none"
-- score 0.20–0.41 → severity "mild"
-- score 0.42–0.64 → severity "moderate"
-- score 0.65–1.00 → severity "severe"
-- Severity MUST match the score range exactly.
-- overall_score: reflects weighted skin health (100 = flawless, 50 = average, 0 = severe issues across the board).
-- At least 3-4 concerns should have a non-zero score for any real face image.
-- dominant_concern in zone_analysis must be one of the 11 concern keys above.
-- positives: score reflects how strong this attribute is (1.0 = exceptional).`;
+const POSITIVE_SCHEMA = {
+  type: SchemaType.OBJECT,
+  properties: {
+    score: { type: SchemaType.NUMBER },
+    label: { type: SchemaType.STRING },
+  },
+  required: ["score", "label"],
+};
+
+const ZONE_SCHEMA = {
+  type: SchemaType.OBJECT,
+  properties: {
+    dominant_concern: { type: SchemaType.STRING },
+    score:            { type: SchemaType.NUMBER },
+  },
+  required: ["dominant_concern", "score"],
+};
+
+const RESPONSE_SCHEMA = {
+  type: SchemaType.OBJECT,
+  properties: {
+    skin_type:     { type: SchemaType.STRING },
+    overall_score: { type: SchemaType.INTEGER },
+    confidence:    { type: SchemaType.NUMBER },
+    concerns: {
+      type: SchemaType.OBJECT,
+      properties: {
+        acne:             CONCERN_SCHEMA,
+        hyperpigmentation: CONCERN_SCHEMA,
+        melasma:          CONCERN_SCHEMA,
+        redness:          CONCERN_SCHEMA,
+        wrinkles:         CONCERN_SCHEMA,
+        fine_lines:       CONCERN_SCHEMA,
+        dryness:          CONCERN_SCHEMA,
+        pore_visibility:  CONCERN_SCHEMA,
+        oiliness:         CONCERN_SCHEMA,
+        dark_circles:     CONCERN_SCHEMA,
+        uneven_texture:   CONCERN_SCHEMA,
+      },
+    },
+    positives: {
+      type: SchemaType.OBJECT,
+      properties: {
+        hydration:  POSITIVE_SCHEMA,
+        evenness:   POSITIVE_SCHEMA,
+        luminosity: POSITIVE_SCHEMA,
+        firmness:   POSITIVE_SCHEMA,
+      },
+    },
+    zone_analysis: {
+      type: SchemaType.OBJECT,
+      properties: {
+        forehead:    ZONE_SCHEMA,
+        left_cheek:  ZONE_SCHEMA,
+        right_cheek: ZONE_SCHEMA,
+        nose:        ZONE_SCHEMA,
+        chin:        ZONE_SCHEMA,
+      },
+    },
+  },
+  required: ["skin_type", "overall_score", "confidence", "concerns", "positives", "zone_analysis"],
+};
+
+// ─── Prompt ───────────────────────────────────────────────────────────────────
+
+const PROMPT = `You are a clinical dermatology AI performing a professional skin assessment for a medical spa. Study this face image carefully before scoring.
+
+STEP 1 — OBSERVE: Examine each facial zone (forehead, cheeks, nose, chin, under-eyes) and note what you actually see.
+
+STEP 2 — SCORE: Based on your observations, assign scores for each concern.
+
+SCORING GUIDE (be honest and precise — clients rely on this for treatment decisions):
+• acne: Count active lesions, blackheads, whiteheads, papules, pustules, post-acne marks. Even 1-2 small pimples = 0.22+
+• hyperpigmentation: Look for dark spots, sun spots, uneven tone patches. Minor unevenness = 0.20+
+• melasma: Larger bilateral brown/grey patches on cheeks, forehead, upper lip. Absent unless clearly visible = 0.0
+• redness: Flushing, visible capillaries, rosy/red areas. Slight flushing = 0.20+
+• wrinkles: Deep-set lines — forehead furrows, nasolabial folds, crow's feet. Fine = 0.20+, obvious = 0.45+
+• fine_lines: Subtle surface lines, especially under-eye, forehead, perioral. Very common in adults = 0.20+
+• dryness: Dull finish, flakiness, tight-looking skin, lack of natural sheen. Slightly dry = 0.20+
+• pore_visibility: Enlarged pores on nose, T-zone. Visible pores are normal and common = 0.20+
+• oiliness: Shine or specular highlights especially T-zone. Slight shine = 0.15+
+• dark_circles: Under-eye discolouration, darkness, shadows. Mild = 0.20+
+• uneven_texture: Surface irregularities, rough patches. Minor = 0.20+
+
+SEVERITY MAPPING (MUST match score):
+• 0.00–0.19 → "none"
+• 0.20–0.41 → "mild"
+• 0.42–0.64 → "moderate"
+• 0.65–1.00 → "severe"
+
+POSITIVE ATTRIBUTES:
+• hydration: Does the skin look plump and moisturised? (dull/flaky = low, dewy/plump = high)
+• evenness: Is the skin tone uniform? (spots/patches = low, uniform = high)
+• luminosity: Does the skin have a healthy natural glow? (dull = low, radiant = high)
+• firmness: Does the skin look firm and elastic? (sagging/lined = low, taut = high)
+
+POSITIVE LABELS: 0.0–0.39 = "needs improvement", 0.40–0.59 = "fair", 0.60–0.79 = "good", 0.80–1.0 = "excellent"
+
+OVERALL SCORE: 100 = flawless clinical skin, 75 = healthy average adult skin, 50 = moderate concerns, 25 = significant issues. Most adults score 55–80.
+
+dominant_concern per zone must be one of: acne, hyperpigmentation, melasma, redness, wrinkles, fine_lines, dryness, pore_visibility, oiliness, dark_circles, uneven_texture`;
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface GeminiSkinScores {
   skin_type: string;
@@ -81,61 +130,46 @@ export interface GeminiSkinScores {
   zone_analysis: Record<string, { dominant_concern: string; score: number }>;
 }
 
-function fallback(): GeminiSkinScores {
-  return {
-    skin_type: "normal",
-    overall_score: 70,
-    confidence: 0.5,
-    concerns: Object.fromEntries(CONCERNS.map(c => [c, { score: 0, severity: "none" }])),
-    positives: {
-      hydration: { score: 0.6, label: "good" },
-      evenness: { score: 0.6, label: "good" },
-      luminosity: { score: 0.6, label: "good" },
-      firmness: { score: 0.6, label: "good" },
-    },
-    zone_analysis: {},
-  };
-}
+// ─── Main ─────────────────────────────────────────────────────────────────────
 
 export async function scoreSkin(croppedFaceDataUrl: string): Promise<GeminiSkinScores> {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    console.error("[gemini] GEMINI_API_KEY not set");
-    return fallback();
-  }
+  if (!apiKey) throw new Error("GEMINI_API_KEY is not configured.");
 
-  try {
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const config: GenerationConfig = { temperature: 0.1 };
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.0-flash",
-      generationConfig: config,
-    });
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const model = genAI.getGenerativeModel({
+    model: "gemini-2.0-flash",
+    generationConfig: {
+      temperature: 0.2,
+      responseMimeType: "application/json",
+      responseSchema: RESPONSE_SCHEMA,
+    },
+  });
 
-    // Convert data URL to inline image part
-    const [, b64] = croppedFaceDataUrl.split(",");
-    const imagePart = {
-      inlineData: { data: b64, mimeType: "image/jpeg" as const },
-    };
+  const [, b64] = croppedFaceDataUrl.split(",");
+  const imagePart = { inlineData: { data: b64, mimeType: "image/jpeg" as const } };
 
-    const result = await model.generateContent([PROMPT, imagePart]);
-    const text = result.response.text().trim();
+  const result = await model.generateContent([PROMPT, imagePart]);
+  const text = result.response.text().trim();
+  console.log("[gemini] raw response (first 300):", text.slice(0, 300));
 
-    // Strip markdown code fences if present
-    const clean = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-    const match = clean.match(/\{[\s\S]*\}/);
-    const raw = JSON.parse(match ? match[0] : clean) as GeminiSkinScores;
+  const raw = JSON.parse(text) as GeminiSkinScores;
 
-    return {
-      skin_type: raw.skin_type ?? "normal",
-      overall_score: Number(raw.overall_score ?? 70),
-      confidence: Number(raw.confidence ?? 0.75),
-      concerns: raw.concerns ?? fallback().concerns,
-      positives: raw.positives ?? fallback().positives,
-      zone_analysis: raw.zone_analysis ?? {},
-    };
-  } catch (err) {
-    console.error("[gemini] vision scoring failed:", err);
-    return fallback();
-  }
+  console.log("[gemini] scores — overall:", raw.overall_score, "skin_type:", raw.skin_type,
+    "top concerns:", Object.entries(raw.concerns ?? {})
+      .filter(([, v]) => v.score > 0.1)
+      .sort((a, b) => b[1].score - a[1].score)
+      .slice(0, 4)
+      .map(([k, v]) => `${k}:${v.score.toFixed(2)}`)
+      .join(", ")
+  );
+
+  return {
+    skin_type:     raw.skin_type    ?? "normal",
+    overall_score: Number(raw.overall_score ?? 70),
+    confidence:    Number(raw.confidence    ?? 0.75),
+    concerns:      raw.concerns     ?? {},
+    positives:     raw.positives    ?? {},
+    zone_analysis: raw.zone_analysis ?? {},
+  };
 }

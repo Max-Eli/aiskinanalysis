@@ -58,12 +58,15 @@ export async function POST(request: NextRequest) {
 
     // ── Step 2: Gemini Vision — skin scoring ─────────────────────────────────
     console.log("[gemini] scoring skin…");
-    const scores = await scoreSkin(croppedFace);
-    console.log("[gemini] scores:", JSON.stringify({
-      score: scores.overall_score,
-      skin_type: scores.skin_type,
-      confidence: scores.confidence,
-    }));
+    let scores;
+    try {
+      scores = await scoreSkin(croppedFace);
+    } catch (geminiErr) {
+      console.error("[gemini] failed:", geminiErr);
+      return NextResponse.json({
+        error: "Skin analysis failed — could not score the image. Please try again with better lighting.",
+      }, { status: 500 });
+    }
 
     // ── Step 3: LLM generates professional narrative ──────────────────────────
     const cvForReport = {
