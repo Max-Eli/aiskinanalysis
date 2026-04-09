@@ -185,7 +185,7 @@ export default function CameraCapture() {
         {/* Face oval */}
         {!captured && hasPermission && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <svg viewBox="0 0 300 400" className="w-56 h-72">
+            <svg viewBox="0 0 300 400" className="h-[65vh] w-auto max-w-[85vw] max-h-[600px]">
               <defs>
                 <mask id="oval-mask">
                   <rect width="300" height="400" fill="white" />
