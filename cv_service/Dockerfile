@@ -5,6 +5,8 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     libgl1 \
+    libgles2 \
+    libegl1 \
     libgomp1 \
     wget \
     && rm -rf /var/lib/apt/lists/*
