@@ -56,11 +56,14 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    const cvMeasurements = cv.cv_measurements ?? {};
+    console.log("[cv-measurements]", JSON.stringify(cvMeasurements));
+
     // ── Step 2: Gemini Vision — skin scoring ─────────────────────────────────
     console.log("[gemini] scoring skin…");
     let scores;
     try {
-      scores = await scoreSkin(croppedFace);
+      scores = await scoreSkin(croppedFace, cvMeasurements);
     } catch (geminiErr) {
       console.error("[gemini] failed:", geminiErr);
       return NextResponse.json({

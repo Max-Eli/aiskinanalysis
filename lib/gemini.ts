@@ -130,9 +130,39 @@ export interface GeminiSkinScores {
   zone_analysis: Record<string, { dominant_concern: string; score: number }>;
 }
 
+// ─── CV measurement formatter ─────────────────────────────────────────────────
+
+function formatMeasurements(m: Record<string, unknown>): string {
+  if (!m || Object.keys(m).length === 0) return "Not available.";
+
+  const zr = (m.zone_redness as Record<string, number>) ?? {};
+  const ed = (m.edge_density as Record<string, number>) ?? {};
+
+  const lines = [
+    `• Dark spots detected: ${m.dark_spot_count ?? 0} spots covering ${m.dark_spot_area_pct ?? 0}% of skin`,
+    `  (>5 spots = notable hyperpigmentation; >15 spots = significant)`,
+    `• Red/inflamed spots: ${m.red_spot_count ?? 0} covering ${m.red_spot_area_pct ?? 0}% of skin`,
+    `  (>2 red spots = acne present; >8 = moderate acne)`,
+    `• Overall redness index: ${m.redness_index ?? 0} (>0.05=slight, >0.12=moderate, >0.20=significant)`,
+    `• Zone redness: forehead=${zr.forehead?.toFixed(3) ?? "n/a"}, left cheek=${zr.left_cheek?.toFixed(3) ?? "n/a"}, right cheek=${zr.right_cheek?.toFixed(3) ?? "n/a"}, nose=${zr.nose?.toFixed(3) ?? "n/a"}`,
+    `• Pigmentation std dev: ${m.pigmentation_std ?? 0} L* (<8=even, 8–14=minor, >14=notable, >20=significant)`,
+    `• Dark circle luminance delta: ${m.dark_circle_delta ?? 0} L* (>4=mild, >8=moderate, >12=significant)`,
+    `• Oiliness (specular highlights): ${m.oiliness_pct ?? 0}% of skin area (>1.5%=slight, >4%=oily)`,
+    `• Mean skin saturation: ${m.mean_saturation ?? 0} (>0.30=hydrated, <0.15=dry/dull)`,
+    `• Texture roughness: ${m.texture_roughness ?? 0} (<0.010=smooth, 0.010–0.020=moderate, >0.020=rough)`,
+    `• Pore density (nose): ${m.pore_density ?? 0} (<0.008=fine, 0.008–0.018=visible, >0.018=enlarged)`,
+    `• Edge density (lines/wrinkles): forehead=${ed.forehead?.toFixed(4) ?? "n/a"}, left cheek=${ed.left_cheek?.toFixed(4) ?? "n/a"}, chin=${ed.chin?.toFixed(4) ?? "n/a"}`,
+    `  (<0.04=smooth, 0.04–0.08=some lines, >0.08=notable lines)`,
+  ];
+  return lines.join("\n");
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-export async function scoreSkin(croppedFaceDataUrl: string): Promise<GeminiSkinScores> {
+export async function scoreSkin(
+  croppedFaceDataUrl: string,
+  cvMeasurements: Record<string, unknown> = {}
+): Promise<GeminiSkinScores> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY is not configured.");
 
@@ -149,7 +179,10 @@ export async function scoreSkin(croppedFaceDataUrl: string): Promise<GeminiSkinS
   const [, b64] = croppedFaceDataUrl.split(",");
   const imagePart = { inlineData: { data: b64, mimeType: "image/jpeg" as const } };
 
-  const result = await model.generateContent([PROMPT, imagePart]);
+  // Inject CV measurements into the prompt as grounding data
+  const measurementBlock = `\n\nOBJECTIVE CV MEASUREMENTS (pixel-level analysis — use these to calibrate your scores):\n${formatMeasurements(cvMeasurements)}\n\nThese measurements are computed from the actual pixel data. Your scores MUST be consistent with them. If dark_spot_count is 12, hyperpigmentation cannot be "none". If red_spot_count is 5, acne cannot be "none".`;
+
+  const result = await model.generateContent([PROMPT + measurementBlock, imagePart]);
   const text = result.response.text().trim();
   console.log("[gemini] raw response (first 300):", text.slice(0, 300));
 

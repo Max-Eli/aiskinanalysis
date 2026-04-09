@@ -20,6 +20,7 @@ from PIL import Image
 
 from image_quality import check_quality
 from face_segment import get_skin_mask
+from skin_measure import measure_skin
 import numpy as np
 
 logging.basicConfig(level=logging.INFO)
@@ -126,7 +127,18 @@ async def analyze(req: AnalyzeRequest):
             "skin_coverage": skin_coverage,
         }
 
-    # 4. Crop face region for Gemini Vision
+    # 4. Objective pixel measurements (anchor for Gemini Vision)
+    try:
+        measurements = measure_skin(img, skin_mask)
+    except Exception as e:
+        log.warning(f"Measurements failed (non-fatal): {e}")
+        measurements = {}
+
+    log.info(f"CV measurements: spots={measurements.get('dark_spot_count')}, "
+             f"redness={measurements.get('redness_index')}, "
+             f"oiliness={measurements.get('oiliness_pct')}%")
+
+    # 5. Crop face region for Gemini Vision
     face_crop = _crop_face(img, skin_mask)
     cropped_b64 = _to_base64(face_crop)
 
@@ -135,6 +147,7 @@ async def analyze(req: AnalyzeRequest):
         "quality_issues": quality["issues"],
         "cropped_face": cropped_b64,
         "skin_coverage": round(skin_coverage, 4),
+        "cv_measurements": measurements,
     }
 
 
