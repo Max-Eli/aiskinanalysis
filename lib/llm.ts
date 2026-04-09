@@ -154,10 +154,20 @@ export async function generateReport(
     options: { temperature: 0.2 },
   });
 
-  const text = response.message.content
-    .trim()
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/, "");
+  const raw = response.message.content.trim();
+  console.log("[llm] raw response (first 200):", raw.slice(0, 200));
 
-  return JSON.parse(text) as LLMReport;
+  // Extract JSON block — model sometimes wraps in markdown or prefixes with text
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) {
+    console.error("[llm] no JSON found in response:", raw.slice(0, 500));
+    throw new Error("LLM did not return valid JSON. Response: " + raw.slice(0, 100));
+  }
+
+  try {
+    return JSON.parse(match[0]) as LLMReport;
+  } catch (e) {
+    console.error("[llm] JSON parse failed:", e, "\nText:", match[0].slice(0, 500));
+    throw new Error("Failed to parse LLM response as JSON.");
+  }
 }
