@@ -252,19 +252,37 @@ export default function ResultsPage() {
         )}
 
         {/* ── Concerns ── */}
-        {Object.keys(concerns).length > 0 && (
-          <Card>
-            <div className="px-5 pt-5 pb-1">
-              <SectionHeader title="Detailed Analysis" icon={<AlertCircle size={14} />} />
-              {Object.entries(concerns)
-                .sort((a, b) => b[1].score - a[1].score)
-                .map(([name, data]) => (
-                  <ConcernRow key={name} name={name} data={data} detail={result.concern_details?.[name]} />
-                ))}
-            </div>
-            <div className="h-4" />
-          </Card>
-        )}
+        {(() => {
+          const detected = Object.entries(concerns).filter(([, d]) => d.severity !== "none").sort((a, b) => b[1].score - a[1].score);
+          const low = Object.entries(concerns).filter(([, d]) => d.severity === "none").sort((a, b) => b[1].score - a[1].score);
+          return (
+            <Card>
+              <div className="px-5 pt-5 pb-1">
+                <SectionHeader title="Detailed Analysis" icon={<AlertCircle size={14} />} />
+                {detected.length === 0 ? (
+                  <p className="text-sm text-stone-500 py-3">No significant concerns detected. Your skin is in good health.</p>
+                ) : (
+                  detected.map(([name, data]) => (
+                    <ConcernRow key={name} name={name} data={data} detail={result.concern_details?.[name]} />
+                  ))
+                )}
+                {low.length > 0 && (
+                  <details className="mt-3 mb-2">
+                    <summary className="text-xs text-stone-400 cursor-pointer select-none hover:text-stone-500">
+                      {low.length} areas within normal range
+                    </summary>
+                    <div className="mt-2">
+                      {low.map(([name, data]) => (
+                        <ConcernRow key={name} name={name} data={data} />
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </div>
+              <div className="h-4" />
+            </Card>
+          );
+        })()}
 
         {/* ── Zone Analysis ── */}
         {Object.keys(zones).length > 0 && (

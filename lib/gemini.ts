@@ -11,14 +11,28 @@ const CONCERNS = [
   "oiliness", "dark_circles", "uneven_texture",
 ] as const;
 
-const PROMPT = `You are a professional dermatology AI trained to assess skin from photographs.
-Analyze this face image and return a JSON skin assessment.
+const PROMPT = `You are a board-certified dermatology AI performing a professional skin analysis for a medical spa client report. Analyze this face image with clinical precision.
 
-Return ONLY valid JSON — no markdown, no explanation — with this exact structure:
+IMPORTANT: Every human face has detectable skin characteristics. Even healthy skin shows pore visibility, some texture variation, or minor hydration differences. Never return all zeros — assess what is actually visible.
+
+Examine the image carefully for:
+- ACNE: Active pimples, papules, pustules, comedones, blackheads, post-acne marks
+- HYPERPIGMENTATION: Dark spots, uneven skin tone, sun spots, post-inflammatory marks
+- MELASMA: Larger patches of brown/grey discolouration on cheeks, forehead, upper lip
+- REDNESS: Flushing, visible capillaries, rosacea patterns, irritated zones
+- WRINKLES: Deep lines — forehead, nasolabial folds, crow's feet
+- FINE LINES: Subtle surface lines, perioral lines, under-eye creasing
+- DRYNESS: Flakiness, tight-looking skin, dull matte finish, rough texture
+- PORE VISIBILITY: Enlarged pores especially on nose, T-zone, cheeks
+- OILINESS: Shine, specular highlights on T-zone (forehead, nose, chin)
+- DARK CIRCLES: Periorbital darkening, under-eye discolouration
+- UNEVEN TEXTURE: Rough patches, bumpy skin surface, irregular surface
+
+Return ONLY valid JSON — no markdown, no explanation:
 {
   "skin_type": "<oily|dry|combination|normal|sensitive>",
-  "overall_score": <integer 0-100, higher = healthier>,
-  "confidence": <float 0.0-1.0, how clearly visible the skin is>,
+  "overall_score": <integer 0-100, higher = healthier skin overall>,
+  "confidence": <float 0.0-1.0, image clarity for analysis>,
   "concerns": {
     "acne": {"score": <0.0-1.0>, "severity": "<none|mild|moderate|severe>"},
     "hyperpigmentation": {"score": <0.0-1.0>, "severity": "<none|mild|moderate|severe>"},
@@ -48,14 +62,15 @@ Return ONLY valid JSON — no markdown, no explanation — with this exact struc
 }
 
 Scoring rules:
-- score 0.00–0.19 = none severity
-- score 0.20–0.41 = mild severity
-- score 0.42–0.64 = moderate severity
-- score 0.65–1.00 = severe severity
-- Severity MUST match the score range.
-- Be objective. If skin looks healthy, reflect that — do not invent concerns.
-- overall_score: 100 = perfect skin, 0 = severe issues.
-- dominant_concern must be one of the 11 concern keys.`;
+- score 0.00–0.19 → severity "none"
+- score 0.20–0.41 → severity "mild"
+- score 0.42–0.64 → severity "moderate"
+- score 0.65–1.00 → severity "severe"
+- Severity MUST match the score range exactly.
+- overall_score: reflects weighted skin health (100 = flawless, 50 = average, 0 = severe issues across the board).
+- At least 3-4 concerns should have a non-zero score for any real face image.
+- dominant_concern in zone_analysis must be one of the 11 concern keys above.
+- positives: score reflects how strong this attribute is (1.0 = exceptional).`;
 
 export interface GeminiSkinScores {
   skin_type: string;

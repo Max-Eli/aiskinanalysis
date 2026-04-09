@@ -3,6 +3,8 @@ import { generateReport } from "@/lib/llm";
 import { scoreSkin } from "@/lib/gemini";
 import { getCurrentTenant } from "@/lib/tenant";
 
+export const maxDuration = 60; // Vercel max function timeout
+
 const CV_SERVICE_URL = process.env.CV_SERVICE_URL ?? "http://localhost:8000";
 
 export async function POST(request: NextRequest) {
