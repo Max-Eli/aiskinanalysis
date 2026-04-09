@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateReport } from "@/lib/llm";
+import { scoreSkin } from "@/lib/gemini";
 import { getCurrentTenant } from "@/lib/tenant";
 
 const CV_SERVICE_URL = process.env.CV_SERVICE_URL ?? "http://localhost:8000";
@@ -15,7 +16,7 @@ export async function POST(request: NextRequest) {
 
     const tenant = await getCurrentTenant();
 
-    // ── Step 1: CV pipeline ───────────────────────────────────────────────────
+    // ── Step 1: CV service — face segmentation + crop ─────────────────────────
     console.log("[cv-service] URL:", CV_SERVICE_URL);
     let cvRes: Response;
     try {
@@ -26,7 +27,7 @@ export async function POST(request: NextRequest) {
       });
     } catch (fetchErr) {
       console.error("[cv-service] fetch failed:", fetchErr);
-      return NextResponse.json({ error: `Cannot reach CV service at ${CV_SERVICE_URL}: ${fetchErr}` }, { status: 502 });
+      return NextResponse.json({ error: `Cannot reach CV service: ${fetchErr}` }, { status: 502 });
     }
 
     if (!cvRes.ok) {
@@ -37,44 +38,57 @@ export async function POST(request: NextRequest) {
 
     const cv = await cvRes.json();
 
-    // Log raw CV scores for debugging
-    console.log("[cv-scores]", JSON.stringify({
-      score: cv.overall_score,
-      skin_type: cv.skin_type,
-      confidence: cv.confidence,
-      concerns: cv.concerns,
-    }, null, 2));
-
-    // Quality gate
+    // Quality gate from CV service
     if (cv.image_quality === "poor") {
       return NextResponse.json({
         image_quality: "poor",
-        quality_issues: cv.quality_issues ?? cv.notes,
+        quality_issues: cv.quality_issues,
       });
     }
 
-    if (cv.confidence < 0.15) {
+    const croppedFace: string = cv.cropped_face;
+    if (!croppedFace) {
       return NextResponse.json({
         image_quality: "poor",
-        quality_issues: ["Could not detect enough skin — ensure your face is well-lit and centred."],
+        quality_issues: ["No face detected. Ensure your face is clearly visible and well-lit."],
       });
     }
 
-    // ── Step 2: LLM generates professional narrative ──────────────────────────
-    const report = await generateReport(cv, tenant.name, tenant.services);
+    // ── Step 2: Gemini Vision — skin scoring ─────────────────────────────────
+    console.log("[gemini] scoring skin…");
+    const scores = await scoreSkin(croppedFace);
+    console.log("[gemini] scores:", JSON.stringify({
+      score: scores.overall_score,
+      skin_type: scores.skin_type,
+      confidence: scores.confidence,
+    }));
 
-    // ── Step 3: Assemble full response ────────────────────────────────────────
+    // ── Step 3: LLM generates professional narrative ──────────────────────────
+    const cvForReport = {
+      image_quality: cv.image_quality,
+      confidence: scores.confidence,
+      analysis_method: "gemini-vision",
+      skin_type: scores.skin_type,
+      overall_score: scores.overall_score,
+      concerns: scores.concerns,
+      positives: scores.positives,
+      zone_analysis: scores.zone_analysis,
+      notes: [] as string[],
+    };
+
+    const report = await generateReport(cvForReport, tenant.name, tenant.services);
+
+    // ── Step 4: Assemble full response ────────────────────────────────────────
     return NextResponse.json({
       image_quality: cv.image_quality,
-      confidence: cv.confidence,
-      analysis_method: cv.analysis_method,
-      skin_type: cv.skin_type,
-      overall_score: cv.overall_score,
-      concerns: cv.concerns,
-      positives: cv.positives,
-      zone_analysis: cv.zone_analysis,
-      notes: cv.notes,
-      // LLM narrative
+      confidence: scores.confidence,
+      analysis_method: "gemini-vision",
+      skin_type: scores.skin_type,
+      overall_score: scores.overall_score,
+      concerns: scores.concerns,
+      positives: scores.positives,
+      zone_analysis: scores.zone_analysis,
+      notes: [],
       headline: report.headline,
       overview: report.overview,
       concern_details: report.concern_details,

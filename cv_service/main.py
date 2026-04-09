@@ -3,7 +3,8 @@ CV Service — FastAPI
 
 POST /analyze
   Body: { "image": "<base64 data URL>" }
-  Returns: structured skin analysis JSON
+  Returns: { image_quality, quality_issues, cropped_face, skin_coverage }
+  The cropped_face is a base64 JPEG of just the face region for Gemini Vision.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from PIL import Image
 
 from image_quality import check_quality
 from face_segment import get_skin_mask
-from skin_analyze import analyze_skin
+import numpy as np
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -27,12 +28,11 @@ log = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Warm-up: pre-load MediaPipe face mesh on startup
-    log.info("Loading MediaPipe Face Mesh…")
+    log.info("Loading MediaPipe Face Landmarker…")
     try:
         from face_segment import _load_model
         _load_model()
-        log.info("MediaPipe Face Mesh loaded.")
+        log.info("MediaPipe Face Landmarker loaded.")
     except Exception as e:
         log.warning(f"Model warm-up failed (will retry on first request): {e}")
     yield
@@ -42,14 +42,14 @@ app = FastAPI(title="Skin CV Service", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=["*"],
     allow_methods=["POST"],
     allow_headers=["*"],
 )
 
 
 class AnalyzeRequest(BaseModel):
-    image: str   # data URL: "data:image/jpeg;base64,..."
+    image: str  # data URL: "data:image/jpeg;base64,..."
 
 
 def _decode_image(data_url: str) -> Image.Image:
@@ -59,6 +59,35 @@ def _decode_image(data_url: str) -> Image.Image:
         raise HTTPException(status_code=400, detail="Invalid image data URL format.")
     raw = base64.b64decode(b64)
     return Image.open(io.BytesIO(raw)).convert("RGB")
+
+
+def _crop_face(img: Image.Image, mask: np.ndarray) -> Image.Image:
+    """Crop to face bounding box with 10% padding."""
+    rows, cols = np.where(mask)
+    if len(rows) == 0:
+        return img
+    h, w = mask.shape
+    y0, y1 = int(rows.min()), int(rows.max())
+    x0, x1 = int(cols.min()), int(cols.max())
+    pad_y = int((y1 - y0) * 0.10)
+    pad_x = int((x1 - x0) * 0.10)
+    y0 = max(0, y0 - pad_y)
+    y1 = min(h, y1 + pad_y)
+    x0 = max(0, x0 - pad_x)
+    x1 = min(w, x1 + pad_x)
+    return img.crop((x0, y0, x1, y1))
+
+
+def _to_base64(img: Image.Image) -> str:
+    """Encode PIL image as base64 JPEG data URL."""
+    max_side = 1024
+    w, h = img.size
+    if max(w, h) > max_side:
+        scale = max_side / max(w, h)
+        img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=88)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
 @app.post("/analyze")
@@ -75,12 +104,11 @@ async def analyze(req: AnalyzeRequest):
         return {
             "image_quality": "poor",
             "quality_issues": quality["issues"],
-            "confidence": 0.0,
-            "concerns": None,
-            "notes": quality["issues"],
+            "cropped_face": None,
+            "skin_coverage": 0.0,
         }
 
-    # 3. Skin-region segmentation
+    # 3. Face segmentation
     try:
         skin_mask = get_skin_mask(img)
     except Exception as e:
@@ -88,67 +116,26 @@ async def analyze(req: AnalyzeRequest):
         raise HTTPException(status_code=500, detail="Segmentation failed.")
 
     skin_coverage = float(skin_mask.mean())
-    if skin_coverage < 0.05:
+    log.info(f"Skin coverage: {skin_coverage:.3f}")
+
+    if skin_coverage < 0.03:
         return {
             "image_quality": "poor",
-            "quality_issues": ["No face detected in the image."],
-            "confidence": 0.0,
-            "concerns": None,
-            "notes": ["Please ensure your face is clearly visible and try again."],
+            "quality_issues": ["No face detected. Ensure your face is clearly visible and well-lit."],
+            "cropped_face": None,
+            "skin_coverage": skin_coverage,
         }
 
-    # 4. Skin analysis (EfficientNet-B0 or feature-based fallback)
-    try:
-        result = analyze_skin(img, skin_mask)
-    except Exception as e:
-        log.error(f"Analysis failed: {e}")
-        raise HTTPException(status_code=500, detail="Analysis failed.")
-
-    # 5. Build clinical notes from results
-    notes = _build_notes(result["concerns"])
+    # 4. Crop face region for Gemini Vision
+    face_crop = _crop_face(img, skin_mask)
+    cropped_b64 = _to_base64(face_crop)
 
     return {
         "image_quality": quality["quality"],
-        "confidence": result["confidence"],
-        "analysis_method": result["method"],
-        "skin_type": result["skin_type"],
-        "overall_score": result["overall_score"],
-        "concerns": result["concerns"],
-        "positives": result["positives"],
-        "zone_analysis": result["zone_analysis"],
-        "notes": notes,
+        "quality_issues": quality["issues"],
+        "cropped_face": cropped_b64,
+        "skin_coverage": round(skin_coverage, 4),
     }
-
-
-def _build_notes(concerns: dict) -> list[str]:
-    notes = []
-    severity_map = {
-        "acne": {
-            "mild": "Mild acne patterns detected — likely comedones or small papules.",
-            "moderate": "Visible inflammatory acne detected across facial zones.",
-            "severe": "Significant acne lesions detected — professional treatment recommended.",
-        },
-        "hyperpigmentation": {
-            "mild": "Slight uneven skin tone detected.",
-            "moderate": "Visible uneven pigmentation on cheek or forehead areas.",
-            "severe": "Significant dark patches or post-inflammatory pigmentation detected.",
-        },
-        "melasma": {
-            "mild": "Possible early melasma patterns detected in cheek/forehead zones.",
-            "moderate": "Moderate melasma-like pigmentation detected.",
-            "severe": "Prominent melasma patches detected — sun protection is critical.",
-        },
-        "redness": {
-            "mild": "Mild skin redness or flushing detected.",
-            "moderate": "Moderate redness or inflammation visible — possible rosacea or irritation.",
-            "severe": "Significant redness detected — may indicate active inflammation.",
-        },
-    }
-    for name, data in concerns.items():
-        sev = data["severity"]
-        if sev != "none" and name in severity_map and sev in severity_map[name]:
-            notes.append(severity_map[name][sev])
-    return notes
 
 
 @app.get("/health")
