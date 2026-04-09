@@ -4,81 +4,7 @@
  * Throws on failure — caller must handle and surface the error.
  */
 
-import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
-
-// ─── Response schema (forces Gemini to always return valid JSON) ──────────────
-
-const CONCERN_SCHEMA = {
-  type: SchemaType.OBJECT,
-  properties: {
-    score:    { type: SchemaType.NUMBER },
-    severity: { type: SchemaType.STRING },
-  },
-  required: ["score", "severity"],
-};
-
-const POSITIVE_SCHEMA = {
-  type: SchemaType.OBJECT,
-  properties: {
-    score: { type: SchemaType.NUMBER },
-    label: { type: SchemaType.STRING },
-  },
-  required: ["score", "label"],
-};
-
-const ZONE_SCHEMA = {
-  type: SchemaType.OBJECT,
-  properties: {
-    dominant_concern: { type: SchemaType.STRING },
-    score:            { type: SchemaType.NUMBER },
-  },
-  required: ["dominant_concern", "score"],
-};
-
-const RESPONSE_SCHEMA = {
-  type: SchemaType.OBJECT,
-  properties: {
-    skin_type:     { type: SchemaType.STRING },
-    overall_score: { type: SchemaType.INTEGER },
-    confidence:    { type: SchemaType.NUMBER },
-    concerns: {
-      type: SchemaType.OBJECT,
-      properties: {
-        acne:             CONCERN_SCHEMA,
-        hyperpigmentation: CONCERN_SCHEMA,
-        melasma:          CONCERN_SCHEMA,
-        redness:          CONCERN_SCHEMA,
-        wrinkles:         CONCERN_SCHEMA,
-        fine_lines:       CONCERN_SCHEMA,
-        dryness:          CONCERN_SCHEMA,
-        pore_visibility:  CONCERN_SCHEMA,
-        oiliness:         CONCERN_SCHEMA,
-        dark_circles:     CONCERN_SCHEMA,
-        uneven_texture:   CONCERN_SCHEMA,
-      },
-    },
-    positives: {
-      type: SchemaType.OBJECT,
-      properties: {
-        hydration:  POSITIVE_SCHEMA,
-        evenness:   POSITIVE_SCHEMA,
-        luminosity: POSITIVE_SCHEMA,
-        firmness:   POSITIVE_SCHEMA,
-      },
-    },
-    zone_analysis: {
-      type: SchemaType.OBJECT,
-      properties: {
-        forehead:    ZONE_SCHEMA,
-        left_cheek:  ZONE_SCHEMA,
-        right_cheek: ZONE_SCHEMA,
-        nose:        ZONE_SCHEMA,
-        chin:        ZONE_SCHEMA,
-      },
-    },
-  },
-  required: ["skin_type", "overall_score", "confidence", "concerns", "positives", "zone_analysis"],
-};
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 // ─── Prompt ───────────────────────────────────────────────────────────────────
 
@@ -172,7 +98,6 @@ export async function scoreSkin(
     generationConfig: {
       temperature: 0.2,
       responseMimeType: "application/json",
-      responseSchema: RESPONSE_SCHEMA,
     },
   });
 
